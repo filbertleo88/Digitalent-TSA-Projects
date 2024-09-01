@@ -1,0 +1,180 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Library
+```{r}
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(parameters)
+library(clusterSim)
+library(fpc)
+library(parameters)
+library(cluster)
+library(plotrix)
+```
+
+# EDA 
+```{r}
+customer = read.csv("C:/Users/Filbert/OneDrive/Documents/Filbert/Pelatihan Digitalent/DTS Data Scientist/Materi/Praktek/Data/customer_segmentation.csv")
+View(customer)
+str(customer)
+```
+
+```{r}
+skimr::skim(customer)
+```
+```{r}
+customer2=customer[,-1]
+boxplot(customer2)
+```
+
+```{r}
+korelasi = cor(customer2, use = "complete.obs")
+
+corrplot(korelasi, type="upper", tl.col="black")
+```
+# PCA
+```{r}
+res.pca = PCA(customer2, graph = FALSE)
+summary(res.pca)
+```
+
+```{r}
+get_eig(res.pca)
+```
+```{r}
+fviz_screeplot(res.pca, addlabels=TRUE, ylim=c(0,50))
+
+var <- get_pca_var(res.pca)
+head(var$coord)
+```
+```{r}
+sweep(res.pca$var$coord, 2,
+      sqrt(res.pca$eig[1:ncol(var$coord),1]), FUN="/")
+```
+```{r}
+fviz_pca_var(res.pca, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+```
+
+# K-Means Clustering
+```{r}
+customer_scale = scale(customer2)
+jarak_data = dist(customer_scale)
+aggl = hclust(jarak_data)
+```
+
+```{r}
+kmeans_customer <- eclust(customer_scale,stand = FALSE,FUNcluster = "kmeans", k=3, graph = T)
+```
+
+```{r}
+cluster_table <- table(kmeans_customer$cluster)
+cluster_percentages <- prop.table(cluster_table) * 100
+cluster_summary <- data.frame(Cluster = names(cluster_table),
+                              Count = as.numeric(cluster_table),
+                              Percentage = cluster_percentages)
+cluster_summary[,-3]
+```
+
+```{r}
+pct = round(cluster_percentages)
+lbs = paste(c("Cluster 1","Cluster 2", "Cluster 3")," ", pct, "%", sep=" ")
+
+pie3D(cluster_table, labels = lbs, main="Pie Chart")
+```
+```{r}
+kmeans_customer$centers
+```
+
+```{r}
+aggregate(customer2,by=list(cluster=kmeans_customer$cluster),FUN = mean)
+```
+
+```{r}
+fviz_cluster(kmeans_customer, data=customer2)
+```
+# Other K-means
+```{r}
+set.seed(123)
+kmeans_customer2 <- kmeans(customer_scale, centers = 3)
+kmeans_customer2 
+```
+```{r}
+table(kmeans_customer2$cluster)
+```
+# Other K-means
+```{r}
+set.seed(123)
+
+kmeans_customer3 <- cluster_analysis(customer_scale,
+  n = 3,
+  method = "kmeans"
+)
+
+predict(kmeans_customer3)
+```
+```{r}
+plot(summary(kmeans_customer3))
+```
+
+# Optimal Cluster
+```{r}
+# # Elbow
+# fviz_nbclust(customer_scale, kmeans, method = "wss") +
+#   geom_vline(xintercept = 4, linetype = 2) + # add line for better visualisation
+#   labs(subtitle = "Elbow method") # add subtitle
+```
+
+```{r}
+# Silhoutte
+fviz_nbclust(customer_scale, kmeans, method = "silhouette") +
+  labs(subtitle = "Silhouette method")
+```
+```{r}
+# # Gap statistic
+# set.seed(123)
+# fviz_nbclust(customer_scale, kmeans,
+#   nstart = 25,
+#   method = "gap_stat",
+#   nboot = 500 # reduce it for lower computation time (but less precise results)
+# ) +
+#   labs(subtitle = "Gap statistic method")
+```
+
+```{r}
+# Consensus-based algorithm
+
+# n_clust <- n_clusters(customer2,
+#   package = c("easystats", "NbClust", "mclust"),
+#   standardize = TRUE
+# )
+# n_clust
+
+# plot(n_clust)
+```
+
+
+# Evaluasi Klaster
+```{r}
+#CH Index
+ch.km <- index.G1(customer_scale, cl=kmeans_customer$cluster)
+#DB Index
+db.km <- index.DB(customer_scale, cl=kmeans_customer$cluster)$DB
+#ASW
+sil.km <- fviz_silhouette(kmeans_customer) 
+sil.km
+```
+```{r}
+clust.eval<-data.frame(
+  Method=c("K-Means"),
+  CH=ch.km,
+  DB=db.km,
+  ASW=colMeans(sil.km$data[3])
+)
+clust.eval
+```
+
