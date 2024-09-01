@@ -1,0 +1,563 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(googledrive)
+
+file_id <- "1MgXXit50GEBE-9cP05wBP3huYRMuVYXD"      # id dari file (dapat dilihat pada alamat url ketika file dibuka)
+temp_file <- tempfile(fileext = ".csv")
+drive_download(as_id(file_id), path = temp_file)
+
+# jika file tersimpan di direktori lokal atau public repo, maka dapat diakses langsung
+data <- read.csv(temp_file)
+```
+<!-- Ekplorasi Data -->
+```{r}
+data$churn <- ifelse(data$churn=="1","Yes","No")
+head(data)
+str(data)
+View(data)
+```
+
+```{r}
+data$MSISDN=NULL
+data$churn <- as.factor(data$churn)
+
+unique(data$churn)
+data
+View(data)
+```
+
+<!-- Visualisasi Perbandingan Setiap Variabel x dengan Variabel Churn -->
+```{r}
+# Create a list to store boxplot objects
+boxplots <- list()
+
+# Loop through each numeric variable
+for (var_x in names(data)[sapply(data, is.numeric)]) {
+  # Create a boxplot for each numeric variable with 'churn' on the x-axis
+  p <- ggplot(data, aes(x = churn, y = .data[[var_x]], fill = churn)) +
+    geom_boxplot() +
+    
+    labs(title = var_x)
+  
+  # Add the boxplot to the list
+  boxplots[[var_x]] <- p
+}
+
+```
+
+```{r}
+library(cowplot)
+plot_grid(plotlist = boxplots)
+```
+```{r}
+skimr::skim(data)
+```
+
+<!-- Visualisasi Jumlah Data Pelanggan Churn -->
+```{r}
+rekap <- data.frame(table(data$churn))
+
+rekap$prop <- round(rekap$Freq/sum(rekap$Freq)*100,2)
+
+rekap
+```
+```{r}
+library(plotrix)
+pct = round(rekap$prop)
+lbs = paste(c("Yes","No")," ", pct, "%", sep=" ")
+
+pie3D(pct, labels = lbs, main="Churn",explode=0.1)
+```
+<!-- Matriks Korelasi -->
+```{r}
+# Membuat matriks Korelasi untuk setiap variabel numerik
+
+library(tidyverse)
+
+num.data <- data %>% select_if(is.numeric)  # Mengambil kolom-kolom numerik saja
+
+corr_matrix <- cor(num.data)
+
+round(corr_matrix, 3)
+```
+```{r}
+library(corrplot)
+
+corrplot(corr_matrix, method="circle", type="upper", diag=T)
+```
+<!-- Sebaran Data -->
+```{r}
+# membuat list plot untuk setiap peubah
+# jika bertipe numerik buat density plot
+# jika bertipe kategorik buat barplot
+
+plots <- lapply(colnames(data), function(var_x){
+  p <-
+    ggplot(data, aes_string(x=var_x))
+    if(is.numeric(data[[var_x]])) {
+      p <- p + geom_density(lwd=0.5, color="darkred")
+
+    } else {
+      p <- p + geom_bar(fill="darkred")
+    }
+})
+
+# install.packages("cowplot")
+library(cowplot)
+
+plot_grid(plotlist = plots)
+```
+<!-- Pembagian Data -->
+```{r}
+# Merubah features kategorik menggunakan label encoding
+# data$churn <- as.integer(as.factor(data$churn))
+
+
+# Membagi data Latih dan Data Uji
+
+library(caret)
+library(ggplot2)
+library(lattice)
+
+set.seed(100)  # Untuk hasil yang dapat direproduksi
+
+# Fungsi createDataPartition dari paket caret untuk membagi data
+# dengan menghasilkan indeks data latih dan data uji
+trainIndex <- createDataPartition(data$churn, p = 0.7,
+                                  list = FALSE,
+                                  times = 1, )
+
+# Buat data latih dan data uji berdasarkan indeks yang dihasilkan
+data.train <- data[trainIndex, ]
+data.test <- data[-trainIndex, ]
+```
+
+<!-- Modelling -->
+<!-- Model Regresi Logistik Biner -->
+```{r}
+model.rlb <- glm(churn ~ ., data=data.train, family="binomial")
+
+summary(model.rlb)
+```
+<!-- PREDIKSI (DATA UJI) -->
+```{r}
+# Memprediksi data TEST
+pred.test <- predict(model.rlb, newdata = data.test, type="response")
+
+# p <= 0.5 menjadi "No" dan > 0,5 menjadi Yes
+pred.test.label <- as.factor(ifelse(pred.test > 0.5, "Yes", "No"))
+
+# untuk membuat confusion Matrix
+confusion_result.model.rlb <- confusionMatrix(data = pred.test.label,
+                reference = data.test$churn,
+                positive="Yes")
+confusion_result.model.rlb
+```
+
+<!-- SELEKSI FITUR (STEPWISE) -->
+```{r}
+# Perform stepwise regression
+model.sw <- step(model.1, direction = "both", trace=F)
+
+# View the final selected model
+summary(model.sw)
+```
+<!-- Prediksi (Data Latih) -->
+```{r}
+# Memprediksi data TRAIN
+pred.train <- predict(model.sw, newdata = data.train, type="response")
+
+# p <= 0.5 menjadi "No" dan > 0,5 menjadi Yes
+pred.train.label <- as.factor(ifelse(pred.train > 0.5, "Yes", "No"))
+
+# untuk membuat confusion Matrix
+confusionMatrix(data = pred.train.label,
+                reference = data.train$churn,
+                positive="Yes")
+```
+<!-- PREDIKSI (DATA UJI) -->
+```{r}
+# Memprediksi data TEST
+pred.test <- predict(model.sw, newdata = data.test, type="response")
+
+# p <= 0.5 menjadi "No" dan > 0,5 menjadi Yes
+pred.test.label <- as.factor(ifelse(pred.test > 0.5, "Yes", "No"))
+# library caret
+# untuk membuat confusion Matrix
+confusion_result.model.sw <- confusionMatrix(data = pred.test.label,
+                reference = data.test$churn,
+                positive="Yes")
+confusion_result.model.sw
+```
+<!-- Penentuan Treshold -->
+```{r}
+library(pROC)
+
+set.seed(111)
+
+# Buat objek ROC menggunakan pROC
+roc1 <- roc(response=data.test$churn, predictor=pred.test,  show.thres=TRUE)
+
+# Gambar kurva ROC
+plot(roc1, main = "Kurva ROC", lwd=2)
+
+# Tampilkan metrik ROC terkait
+auc(roc1)  # Area di bawah kurva ROC (AUC)
+
+# Berdasarkan hasil ini best threshold = 0.82
+```
+```{r}
+coords(roc1, "best", ret=c("threshold", "specificity", "sensitivity", "1-npv"))
+
+# coords(roc1, "local maximas", ret=c("threshold", "sens", "spec", "ppv", "npv"))
+
+# Berdasarkan hasil ini best threshold = 0.33
+```
+```{r}
+# Memprediksi data TEST
+pred.test <- predict(model.sw, newdata = data.test, type="response")
+
+# untuk membuat confusion Matrix
+#k <= 0.33 menjadi No dan > 0.33 menjadi Yes
+pred.test.0.33 <- ifelse(pred.test <= 0.33, "No", "Yes")
+
+confusion_result.treshold <- confusionMatrix(data = factor(pred.test.0.33),
+                reference = factor(data.test$churn),
+                positive="Yes")
+
+confusion_result.treshold
+```
+
+```{r}
+data_confusion.matrix <- data.frame(
+  Model = c("Model Regresi Logistik Biner","Model Regresi Logistik dengan StepWise", "Model Regresi Logistik dengan Treshold"),
+  Accuracy = c(confusion_result.model.rlb$overall["Accuracy"], confusion_result.model.sw$overall["Accuracy"], confusion_result.treshold$overall["Accuracy"]),
+  Sensitivity = c(confusion_result.model.rlb$byClass["Sensitivity"],confusion_result.model.sw$byClass["Sensitivity"],confusion_result.treshold$byClass["Sensitivity"]),
+  Specificity = c(confusion_result.model.rlb$byClass["Specificity"],confusion_result.model.sw$byClass["Specificity"],confusion_result.treshold$byClass["Specificity"])
+)
+data_confusion.matrix
+```
+
+<!-- CART (DECISSION TREE) -->
+<!-- TREE 1 (PARAMETER DEFAULT) -->
+```{r}
+library(rpart)
+library(rpart.plot)
+```
+
+```{r}
+model.cart <- rpart(churn ~ ., data=data.train, method = "class")
+
+model.cart
+```
+```{r}
+# Visualisasi Tree
+rpart.plot(model.cart)
+```
+<!-- Peubah Penting -->
+```{r}
+# mengecek ukuran kepentingan setiap peubah
+print(model.cart$variable.importance)
+```
+
+<!-- PREDIKSI (DATA UJI) -->
+```{r}
+# Memprediksi data TEST
+pred.test.cart <- predict(model.cart, newdata = data.test, type="class")
+
+# Melihat prediksi pada 5 data.test yang pertama
+head(pred.test.cart, 10)
+```
+```{r}
+# untuk membuat confusion Matrix
+confusion_result.model.cart <- confusionMatrix(data = factor(pred.test.cart),
+                reference = factor(data.test$churn))
+
+confusion_result.model.cart
+```
+<!-- TREE 2 (PARAMETER CUSTOM) -->
+```{r}
+# rpart.control : mengatur nilai parameter model (lihat : ?rpart.control)
+control = rpart.control(minsplit = 5, cp = 0.01, maxdepth = 10)
+
+model.cart.2 <- rpart(churn ~ ., data=data.train, method = "class", control = control)
+
+model.cart.2
+```
+```{r}
+# Visualisasi Tree
+rpart.plot(model.cart.2)
+```
+<!-- Peubah Penting -->
+```{r}
+# mengecek ukuran kepentingan setiap peubah
+print(model.cart.2$variable.importance)
+```
+<!-- PREDIKSI (DATA UJI) -->
+```{r}
+# Memprediksi data TEST
+pred.test.cart.2 <- predict(model.cart.2, newdata = data.test, type="class")
+
+# Melihat prediksi pada 10 data.test yang pertama
+head(pred.test.cart.2, 10)
+```
+```{r}
+# untuk membuat confusion Matrix
+confusion_result.model.cart.2 <- confusionMatrix(data = factor(pred.test.cart.2),
+                reference = factor(data.test$churn))
+
+confusion_result.model.cart.2
+```
+<!-- TREE 3 (PRUNED) -->
+```{r}
+# Melihat split dan nilai cp
+plotcp(model.cart.2)
+
+printcp(model.cart.2)
+```
+```{r}
+# melihat nilai cp yang menghasilkan error terkecil
+model.cart.2$cptable[which.min(model.cart.2$cptable[,"xerror"]),"CP"]
+```
+```{r}
+bestcp <- model.cart$cptable[which.min(model.cart$cptable[,"xerror"]),"CP"]
+
+# membuat model berdasarkan nilai cp terbaik
+model.cart.pruned <- prune(model.cart, cp = bestcp)
+```
+
+```{r}
+# Visualisasi Tree
+rpart.plot(model.cart.pruned)
+```
+<!-- PREDIKSI (DATA UJI) -->
+```{r}
+# Memprediksi data TEST
+pred.test.cart.3 <- predict(model.cart.pruned, newdata = data.test, type="class")
+
+# Melihat prediksi pada 10 data.test yang pertama
+head(pred.test.cart.3, 10)
+```
+```{r}
+# untuk membuat confusion Matrix
+confusion_result.model.cart.3 <- confusionMatrix(data = factor(pred.test.cart.3),
+                reference = factor(data.test$churn))
+
+confusion_result.model.cart.3
+```
+<!-- Random Forest -->
+```{r}
+library(randomForest)
+```
+
+<!-- Model -->
+```{r}
+model.rf <- randomForest(churn ~ ., data = data.train, ntree = 100)
+```
+
+```{r}
+print(model.rf$confusion[,1:2])
+```
+<!-- Peubah Penting -->
+```{r}
+model.rf$importance
+```
+```{r}
+# visualisasi peubah penting model random forest
+varImpPlot(model.rf, color="darkred")
+```
+<!-- Prediksi & Validasi (Data Uji) -->
+```{r}
+predictions <- predict(model.rf, data.test)
+
+# Evaluate the classification model
+confusion_result.model.rf <- confusionMatrix(data = predictions,
+                reference = as.factor(data.test$churn))
+
+confusion_result.model.rf
+```
+```{r}
+data_confusion.matrix_2 <- data.frame(
+  Model = c("Model CART 1 (PARAMETER DEFAULT)", "Model CART 2 (PARAMETER CUSTOM)", "Model CART 3 (PRUNED)", "Model Random Forest"),
+  Accuracy = c(confusion_result.model.cart$overall["Accuracy"], confusion_result.model.cart.2$overall["Accuracy"], confusion_result.model.cart.3$overall["Accuracy"], confusion_result.model.rf$overall["Accuracy"]),
+  Sensitivity = c(confusion_result.model.cart$byClass["Sensitivity"],confusion_result.model.cart.2$byClass["Sensitivity"], confusion_result.model.cart.3$byClass["Sensitivity"],confusion_result.model.rf$byClass["Sensitivity"]),
+  Specificity = c(confusion_result.model.cart$byClass["Specificity"], confusion_result.model.cart.2$byClass["Specificity"], confusion_result.model.cart.3$byClass["Specificity"], confusion_result.model.rf$byClass["Specificity"])
+)
+data_confusion.matrix_2
+```
+
+<!-- SVM -->
+```{r}
+library(e1071)
+```
+
+```{r}
+model.svm <- svm(churn ~ ., data=data.train, kernel = "linear", class.weights = list("Yes"=0.5, "No"=0.25))
+```
+
+```{r}
+# memprediksi data uji dengan model SVM
+pred.svm.test <- predict(model.svm, data.test)
+```
+
+```{r}
+# Evaluate the classification model
+confusion_result.model.svm <- confusionMatrix(data = pred.svm.test,
+                reference = data.test$churn)
+
+confusion_result.model.svm
+```
+
+
+<!-- NAIVE BAYES -->
+```{r}
+# install.packages("klaR")
+library(klaR)
+```
+
+```{r}
+model.nb <- NaiveBayes(churn ~ ., data=data.train )
+```
+
+```{r}
+# memprediksi data uji dengan model Naive Bayes
+pred.nb.test <- predict(model.nb, data.test)
+```
+
+```{r}
+# Evaluate the classification model
+confusion_result.model.nb <- confusionMatrix(data = pred.nb.test$class,
+                reference = data.test$churn)
+
+confusion_result.model.nb
+```
+
+
+<!-- Tuning Hyperparameter -->
+<!-- Grid Searh CV -->
+```{r}
+# Membuat fungsi untuk menangani pelatihan model dengan berbagai nilai parameter
+rf.tune <- function(ntree, nodesize, maxnodes, tunegrid, control, seed=123) {
+
+  modellist <- list()
+
+  param.grid = expand.grid(ntree, nodesize, maxnodes)
+  names = c("ntree", "nodesize", "maxnodes")
+
+  param.grid <- setNames(param.grid, names)
+  best.accuracy <- 0.0
+
+  best.model <- list("model"=NULL, "ntree"=NULL, "nodesize"=NULL, "maxnodes"=NULL, "accuracy"=0.0)
+
+  # melakukan iterasi secara manual untuk setiap kombinasi hiperparameter
+  for (i in 1:nrow(param.grid)){
+    nt = param.grid[i, "ntree"]
+    ns = param.grid[i, "nodesize"]
+    mn = param.grid[i, "maxnodes"]
+
+    set.seed(seed)
+
+    # membangun model dengan pengaturan parameter tertentu (sesuai iterasi)
+    fit <- train(factor(churn) ~ ., data=data.train, method="rf", metric="Accuracy",
+                          tuneGrid=tunegrid, trControl=control,
+                          ntree=nt, nodesize=ns, maxnodes=mn)
+
+    # melaukan prediksi data test
+    pred.test <- predict(fit, data.test)
+
+    # Menghitung akurasi pda data uji
+    accuracy <- mean(pred.test == data.test$churn)
+
+    # jika akurasi lebih baik, maka simpan sebagai model terbaik
+    if(accuracy > best.accuracy){
+        best.model$model = fit
+        best.model$ntree = nt
+        best.model$nodesize = ns
+        best.model$maxnodes = mn
+        best.model$accuracy = accuracy
+    }
+
+  }
+
+  # mengembalikan hasil model dan parameter terbaik
+  return (best.model)
+}
+
+
+# Contoh penerapan
+# Manual Search
+control <- trainControl(method="repeatedcv", number=5, repeats=5, search="grid", allowParallel = T)
+
+tunegrid <- expand.grid(.mtry=c(3, 4))
+ntree.list <- c(50, 100, 200)
+nodesize.list <- 1:4
+maxnodes.list <- c(100, 200, NULL)      # NULL: Tidak dibatasi (jumlah akan bergantung pada nodesize)
+
+best.model <- rf.tune(ntree.list, nodesize.list, maxnodes.list, tunegrid, control, seed = 123)
+
+best.model
+```
+
+<!-- Prediksi & Evaluasi (Data Test) -->
+```{r}
+pred.test <- predict(best.model$model , data.test)
+
+head(pred.test, 10)
+```
+
+```{r}
+confusion_result.model.tune <- confusionMatrix(pred.test, factor(data.test$churn))
+confusion_result.model.tune
+```
+
+```{r}
+data_confusion.matrix_3 <- data.frame(
+  Model = c("Model SVM", "Model Naive Bayes", "Model Grid Searh CV with Tune Hyperparameter"),
+  Accuracy = c(confusion_result.model.svm$overall["Accuracy"], confusion_result.model.nb$overall["Accuracy"], confusion_result.model.tune$overall["Accuracy"]),
+  Sensitivity = c(confusion_result.model.svm$byClass["Sensitivity"],confusion_result.model.nb$byClass["Sensitivity"], confusion_result.model.tune$byClass["Sensitivity"]),
+  Specificity = c(confusion_result.model.svm$byClass["Specificity"],confusion_result.model.nb$byClass["Specificity"], confusion_result.model.tune$byClass["Specificity"])
+)
+data_confusion.matrix_3
+```
+
+<!-- Perbandingan Komponen Tiap Model -->
+```{r}
+# Gabungkan data frames
+combined_df <- rbind(data_confusion.matrix, data_confusion.matrix_2, data_confusion.matrix_3)
+
+# Tampilkan data frame gabungan
+print(combined_df)
+```
+<!-- Prediksi dengan Data Baru -->
+```{r}
+library(googledrive)
+
+file_id <- "1h-fnxjOKA5tUQYFLmd3U7z85579h5YGQ"      # id dari file (dapat dilihat pada alamat url ketika file dibuka)
+temp_file <- tempfile(fileext = ".csv")
+drive_download(as_id(file_id), path = temp_file)
+
+# jika file tersimpan di direktori lokal atau public repo, maka dapat diakses langsung
+data_test_baru <- read.csv(temp_file)
+
+head(data_test_baru)
+```
+<!-- Menggunakan model Tuning Hyperparameter yang menjadi salah satu model paling baik -->
+<!-- Prediksi & Evaluasi (Data Test) -->
+```{r}
+pred.test_baru <- predict(best.model$model , data_test_baru)
+
+head(pred.test_baru,10)
+```
+<!-- Menampilkan hasil prediksi untuk data testing baru -->
+```{r}
+# Menambahkan kolom prediksi ke dalam data pengujian
+data_test_baru$Predicted_Churn_Probability <- pred.test_baru
+data_test_baru
+```

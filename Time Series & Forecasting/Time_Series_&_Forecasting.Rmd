@@ -1,0 +1,329 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(forecast)
+library(TTR)
+library(fpp2)
+library(tseries)
+library(astsa)
+library(fpp3)
+library(ggpubr) 
+library(fGarch) # garchFit()
+library(rugarch) # garch fitting
+library(TSA)
+library(aTSA) # arch.test
+library(PerformanceAnalytics)
+library(xts)
+```
+
+```{r}
+library(googledrive)
+
+file_id <- "1_yORcBjtE48DhFausyYt69-h_qYDo9bs"      # id dari file (dapat dilihat pada alamat url ketika file dibuka)
+temp_file <- tempfile(fileext = ".csv")
+drive_download(as_id(file_id), path = temp_file)
+
+# jika file tersimpan di direktori lokal atau public repo, maka dapat diakses langsung
+data <- read.csv(temp_file)
+```
+<!-- Ekplorasi Data -->
+```{r}
+# Mengubah jenis data ds menjadi datetime
+data$ds <- as.POSIXct(gsub("T|Z", " ", data$ds), format="%Y-%m-%d %H:%M")
+
+data<-aggregate(y~ds, data, sum)
+glimpse(data)
+
+tail(data)
+```
+
+```{r}
+# Membentuk data Training
+ts_train <- data %>% 
+  filter(year(ds) == 2023 & month(ds) %in% 1:4)
+tail(ts_train)
+```
+
+```{r}
+# Membentuk Data Testing
+ts_test <- data %>% 
+  filter(year(ds) == 2022 & month(ds) == 5 & day(ds) %in% 1:20)
+tail(ts_test)
+```
+
+```{r}
+# Ubah data menjadi objek Time-Series dengan frequency bernilai 24
+ts_data<-ts(data=ts_train$y, frequency = 24)
+```
+
+```{r}
+# Melakukan plot ACF dan PACF terhadap data train
+par(mfrow = c(1,2))
+acf(ts_data)
+pacf(ts_data)
+```
+Diketahui dari output tersebut pada ACF dan PACF data TMA bergelombang karena data tersebut mengandung musiman sehingga membuktikan bahwa data tersebut tidak stasioner. Karena data tersebut terbukti tidak stasioner maka data akan didiferensikan.
+
+```{r}
+# Dekomposisi terhadap data time series menjadi beberapa komponen
+
+df_dekomposisi <- decompose(ts_data, type="additive")
+plot(df_dekomposisi)
+```
+
+```{r}
+## Plot Data Deret Waktu Musiman
+plot(ts_data, main="Plot Data Musiman", ylab="Y")
+
+## Plot Data secara musiman
+seasonplot(x=ts_data, s=24, col=rainbow(5))
+
+## Plot per subseries
+ggmonthplot(ts_data)
+```
+# Data Non-Musiman (Non-Seasonal)
+```{r}
+# Plot ACF dan PACF data Non-Musiman
+acf1 <- acf(ts_data, lag.max=96, xaxt="n", main="ACF" )
+axis(1, at=0:96/24, labels = 0:96)
+
+pacf1<- pacf(ts_data, lag.max=96, xaxt="n", main="PACF")
+axis(1,at=0:96/24, labels = 0:96)
+```
+Bentuk grafik Tail Off sehingga belum stasioner untuk data Non-Musiman
+
+```{r}
+# Plot ACF data Musiman
+acf1$lag <- acf1$lag * 24
+acf1.1<- as.data.frame(cbind(acf1$acf,acf1$lag))
+acf1.2<- acf1.1[which(acf1.1$V2%%24==0),]
+barplot(height = acf1.2$V1,names.arg=acf1.2$V2, ylab="ACF", xlab="Lag", main="ACF Musiman")
+```
+Bentuk grafik Tail Off sehingga belum stasioner untuk data Musiman
+
+```{r}
+# Lakukan differensi ordo 2 kali terhadap data Non-Musiman
+diff2_seasonal <- diff(ts_data, differences=2)
+ts.plot(diff2_seasonal, type="l", main="Plot Data Training St-d2", xlab="Waktu(t)", ylab="Y (d2)")
+```
+```{r}
+# Plot ACF dan PACF data Non-Musiman
+acf2<-acf(diff2_seasonal,lag.max=96,xaxt="n",main="ACF d2")
+axis(1, at=0:96/24, labels = 0:96)
+
+pacf2<- pacf(diff2_seasonal, lag.max=96, xaxt="n", main="PACF d2")
+axis(1,at=0:96/24, labels = 0:96)
+```
+Bentuk grafik Cut Off sehingga sudah stasioner untuk data Non-Musiman
+
+```{r}
+# Plot ACF data Musiman setelah didiferensi ordo 2 kali
+acf2$lag <- acf2$lag * 24
+acf2.1<- as.data.frame(cbind(acf2$acf,acf2$lag))
+acf2.2<- acf2.1[which(acf2.1$V2%%24==0),]
+barplot(height = acf2.2$V1,names.arg=acf2.2$V2, ylab="ACF", xlab="Lag", main="ACF d2 Musiman")
+```
+Bentuk grafik Tail Off sehingga belum stasioner untuk data Musiman
+
+# Data Musiman (Seasonal)
+```{r}
+# Lakukan differensi 1 kali terhadap data Musiman
+diff24_seasonal=diff(ts_data, lag=24)
+ts.plot(diff24_seasonal,main="Plot Data Training Y-D1",xlab="Waktu(t)", ylab="Y (D1)")
+```
+```{r}
+acf3<- acf(diff24_seasonal, lag.max=96, xaxt="n", main="ACF D1")
+axis(1,at=0:96/24, labels = 0:96)
+
+pacf3<- pacf(diff24_seasonal, lag.max=96, xaxt="n", main="PACF D1")
+axis(1,at=0:96/24, labels = 0:96)
+```
+Bentuk grafik Cut Off sehingga sudah stasioner untuk data Musiman
+
+```{r}
+acf3$lag <- acf3$lag * 24
+acf3.1<- as.data.frame(cbind(acf3$acf,acf3$lag))
+acf3.2<- acf3.1[which(acf3.1$V2 %% 24==0),]
+barplot(height = acf3.2$V1,names.arg=acf3.2$V2, ylab="ACF", xlab="Lag", main="ACF D1 Musiman")
+```
+Bentuk grafik Cut Off sehingga sudah stasioner untuk data Musiman
+
+# Gabungkan differensi Non-Musiman dan Musiman
+```{r}
+diff24_2_seasonal <- diff(diff24_seasonal, differences=2)
+ts.plot(diff24_2_seasonal, type="l", main="Plot Data Training St-d2D1", xlab="Waktu(t)", ylab="Y (d2D1)")
+```
+```{r}
+diff24_2_seasonal %>% ggtsdisplay(lag.max = 100)
+```
+Non-Musiman $ARIMA(p,d,q)$ -> Dari plot PACF Tail Off terjadi sampai lag ke 12 (dapat bernilai 12 atau 0 apabila dianggap terlalu banyak), Dilakukan juga Differensi Non-Musiman sebanyak 2 kali (bernilai 2), Dari plot PACF Cut Off terjadi pada lag ke 2 (bernilai 2) -> $ARIMA(0,2,2)$
+Musiman $ARIMA(P,D,Q)$ -> Dari plot PACF Cut Off terjadi pada lag ke 72 (bernilai 3), Dilakukan juga Differensi Musiman sebanyak 1 kali (bernilai 1), Dari plot PACF Cut Off terjadi pada lag ke 24 (bernilai 1) -> $ARIMA(3,1,1)$
+Frequensi (m) yang digunakan sebanyak 24
+
+Sehingga model yang diperoleh adalah $ARIMA(0,2,2)(3,1,1)^24$
+
+# Pemodelan
+
+```{r}
+# Dapat menggunakan auto arima untuk menentukan model yang baik
+auto.arima(ts_data,
+           stepwise = FALSE,
+           approximation = FALSE)
+```
+Kandidat Model :
+1. Model1 (Plot ACF & PACF) = $ARIMA(0,2,2)(3,1,1)^24$
+2. Model2 (Auto Arima)= $ARIMA(2,0,2)(1,1,0)^24$
+
+```{r}
+# Model SARIMA 1
+model1_seasonal<-Arima(ts_data,order=c(0,2,2),seasonal=c(3,1,1))
+summary(model1_seasonal)
+lmtest::coeftest(model1_seasonal)
+checkresiduals(model1_seasonal)
+```
+```{r}
+# Model SARIMA 2
+model2_seasonal<-Arima(ts_data,order=c(2,0,2),seasonal=c(1,1,0))
+summary(model2_seasonal)
+lmtest::coeftest(model2_seasonal)
+checkresiduals(model2_seasonal)
+```
+```{r}
+# Perbandingan model SARIMA
+c(SARIMA1=AIC(model1_seasonal),SARIMA2=AIC(model2_seasonal))
+```
+Berdasarkan nilai AIC diperoleh AIC SARIMA(1) lebih kecil, sehingga model terbaik adalah SARIMA(2). Model dengan nilai AIC yang lebih rendah dianggap lebih baik karena memberikan penjelasan yang lebih baik terhadap data tanpa overfitting.
+
+
+# Diagnostik model
+```{r}
+# Plot sisaan dan Sisaan Terstandardisasi
+par(mfrow=c(1,2))
+plot(residuals(model2_seasonal), type="p", ylab="sisaan"); abline(h=0)
+plot(rstandard(model2_seasonal), ylab="sisaan terstandardisasi"); abline(h=0)
+```
+
+```{r}
+# Plot q-q dan histogram
+par(mfrow=c(1,2))
+h<-hist(residuals(model2_seasonal), main="Histogram Residual")
+xfit<-seq(min(residuals(model2_seasonal)), max(residuals(model2_seasonal)), length=100)
+yfit<-dnorm(xfit, mean=mean(residuals(model2_seasonal)), sd=sd(residuals(model2_seasonal)))
+yfit<-yfit*diff(h$mids[1:2])*length(residuals(model2_seasonal))
+lines(xfit,yfit)
+qqnorm(residuals(model2_seasonal)); qqline(residuals(model2_seasonal))
+```
+```{r}
+# Plot ACF dan PACF sisaan
+par(mfrow = c(1,2))
+Acf(residuals(model2_seasonal), main="Plot ACF Sisaan")
+Pacf(residuals(model2_seasonal), main="Plot PACF Sisaan")
+```
+# Overfitting Model
+Model yang digunakan adalah Model SARIMA(2) yaitu $ARIMA(2,0,2)(1,1,0)^24$. Ubah salah satu AR/MA saja sebanyak 1 level.
+
+```{r}
+# Model Overfitting 1 
+model_overfitt1_seasonal<-Arima(ts_data,order=c(2,0,3),seasonal=c(1,1,0))
+summary(model_overfitt1_seasonal)
+lmtest::coeftest(model_overfitt1_seasonal)
+checkresiduals(model_overfitt1_seasonal)
+```
+
+```{r}
+# Model Overfitting 2 
+model_overfitt2_seasonal<-Arima(ts_data,order=c(2,0,2),seasonal=c(2,1,0))
+summary(model_overfitt2_seasonal)
+lmtest::coeftest(model_overfitt2_seasonal)
+checkresiduals(model_overfitt2_seasonal)
+```
+```{r}
+# Model Overfitting 3 
+model_overfitt3_seasonal<-Arima(ts_data,order=c(2,0,2),seasonal=c(1,1,1))
+summary(model_overfitt3_seasonal)
+lmtest::coeftest(model_overfitt3_seasonal)
+checkresiduals(model_overfitt3_seasonal)
+```
+```{r}
+# Perbandingan model SARIMA dan model Overfitting SARIMA
+c(SARIMA1=AIC(model1_seasonal),SARIMA2=AIC(model2_seasonal), OverSARIMA1=AIC(model_overfitt1_seasonal), OverSARIMA2=AIC(model_overfitt2_seasonal), OverSARIMA3=AIC(model_overfitt3_seasonal))
+```
+Terlihat bahwa Model OverSARIMA3 memiliki nilai AIC terkecil,namun kita perlu mengecek keakuratan prediksi model terhadap data testing
+
+# Peramalan
+
+```{r}
+# Menggunakan Model Sarima x untuk Prediksi
+prediksi <- forecast::forecast(model1_seasonal,480) # 20 hari * 24 jam
+
+# Menghitung akurasi model
+forecast::accuracy(prediksi, ts_test$y[1:480])
+
+# Plot hasil prediksi 10 hari kedepan
+plot(prediksi)
+```
+```{r}
+# Menggunakan Model Sarima x untuk Prediksi
+prediksi <- forecast::forecast(model2_seasonal,480) # 20 hari * 24 jam
+
+# Menghitung akurasi model
+forecast::accuracy(prediksi, ts_test$y[1:480])
+
+# Plot hasil prediksi 10 hari kedepan
+plot(prediksi)
+```
+
+```{r}
+# Menggunakan Model Sarima x untuk Prediksi
+prediksi <- forecast::forecast(model_overfitt3_seasonal,480) # 20 hari * 24 jam
+
+# Menghitung akurasi model
+forecast::accuracy(prediksi, ts_test$y[1:480])
+
+# Plot hasil prediksi 10 hari kedepan
+plot(prediksi)
+```
+Model yang digunakan sebagai model akhir adalah model $ARIMA(2,0,2)(1,1,0)^24$ karena memiliki nilai MAPE pada testing paling kecil yaitu (14.80 atau keaukuratan sekitar 85%)
+
+```{r}
+# Melihat nilai maksimal (terakhir) dalam data asli 
+data$ds %>% 
+  max() %>% 
+  format("%y-%m-%d %H:%M:%S")
+```
+
+```{r}
+# Memotong 92 hari terakhir dari data asli
+data_model <- data %>% 
+  tail(92*24)
+
+# Menampilkan summary dari data yang dipotong
+data_model %>% summary()
+```
+
+```{r}
+# Mengubah data menjadi Time Series
+model_ts <- ts(data_model$y, frequency = 24)
+
+# Menggunakan model $ARIMA(2,0,2)(1,1,0)^24$ sebagai model akhir
+final_model<-Arima(model_ts,order=c(2,0,2),seasonal=c(1,1,0))
+```
+
+```{r} 
+# Melakukan prediksi untuk 6 jam kedepan
+ramalan_next <- forecast::forecast(final_model,6) # 1 day * 6 hours
+
+# Plot hasil prediksi
+plot(ramalan_next)
+```
+
+```{r}
+# Mengubah nilai forecast menjadi dataframe
+ramalan_next %>% 
+  as.data.frame() %>% 
+  round()
+```

@@ -1,0 +1,448 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Load Package
+```{r}
+# install.packages("tidyverse")
+library(tidyverse)
+library(readxl)
+```
+# Import Data
+
+```{r}
+# Lokasi File
+file_path <- "C:/Users/Filbert/OneDrive/Documents/Filbert/Pelatihan Digitalent/DTS Data Scientist/Materi/Praktek/Data/TMA Depok 2023.xlsx" 
+
+# Liat nama sheet pada file
+shnm <- excel_sheets(file_path)
+shnm
+```
+```{r}
+# Import Data sheet beberapa baris pertama
+
+read_xlsx(path = file_path, sheet = shnm[1], n_max = 10)
+read_xlsx(path = file_path, sheet = shnm[2], n_max = 10)
+read_xlsx(path = file_path, sheet = shnm[3], n_max = 10)
+```
+```{r}
+# Import dan gabungkan semua data
+tma_depok <- purrr::map(.x = shnm, .f = function(sh){
+  read_xlsx(path = file_path, sheet = sh)
+}) |>
+  list_rbind()
+```
+
+# Baris Pertama
+```{r}
+# Tampilkan n = 6 baris pertama (default)
+head(tma_depok)
+
+# Tampilkan n = 10 baris pertama
+head(tma_depok, n = 10)
+
+# Tampilkan n = 10 baris terakhir
+tail(tma_depok, n = 10)
+```
+# Struktur Data
+```{r}
+str(tma_depok)
+# atau
+dplyr::glimpse(tma_depok)
+```
+```{r}
+# Baris dan kolom
+dim(tma_depok)
+nrow(tma_depok)
+ncol(tma_depok)
+```
+# Statistik
+```{r}
+# Nilai minimum
+min(tma_depok$`Tinggi Air`)
+
+# Nilai maksimum
+max(tma_depok$`Tinggi Air`)
+
+# Wilayah(Range)
+range(tma_depok$`Tinggi Air`)
+diff(range(tma_depok$`Tinggi Air`))
+
+diff(c(1,3))
+diff(c(3,1))
+
+# Nilai tengah (median)
+median(tma_depok$`Tinggi Air`) 
+quantile(tma_depok$`Tinggi Air`, probs = 0.50)
+
+# Nilai quantile 25% (Q1)
+quantile(tma_depok$`Tinggi Air`, probs = 0.25)
+
+# Nilai quantile 75% (Q3)
+quantile(tma_depok$`Tinggi Air`, probs = 0.75)
+
+# Nilai quantile 95%
+quantile(tma_depok$`Tinggi Air`, probs = 0.95)
+
+# Nilai Interquantile Range (IQR = Q3 - Q1)
+quantile(tma_depok$`Tinggi Air`, probs = 0.75) - quantile(tma_depok$`Tinggi Air`, probs = 0.25) # atau
+diff(quantile(tma_depok$`Tinggi Air`, probs = c(0.25, 0.75)))
+```
+```{r}
+# Nilai rata-rata
+mean(tma_depok$`Tinggi Air`)
+
+# Nilai rata-rata terpangkas 5%
+mean(tma_depok$`Tinggi Air`, trim = 0.025)
+
+# Ragam (Variance)
+var(tma_depok$`Tinggi Air`)
+
+# Simpangan baku (Standard Deviation)
+sqrt(var(tma_depok$`Tinggi Air`)) # atau
+sd(tma_depok$`Tinggi Air`)
+
+# Banyaknya missing value
+sum(is.na(tma_depok$`Tinggi Air`))
+```
+# Ringkasan Statistik
+```{r}
+summary(tma_depok)
+
+summary(tma_depok$`Tinggi Air`)
+```
+```{r}
+# install.packages("skimr")
+skimr::skim(tma_depok)
+```
+# Transformasi Data
+```{r}
+tma_depok
+```
+
+```{r}
+# Cek Jam yang tidak per 10 menit
+tma_depok |>
+  distinct(Jam) |>
+  filter(str_detect(Jam, "0$", negate = TRUE))
+```
+```{r}
+tma_d <- tma_depok |> # |>: pipe operator "then"
+  # Memisahkan kolom "Jam" menjadi kolom Jam dan menit berdasarkan ":"
+  separate_wider_delim(cols = Jam, delim = ":", names = c("Jam","Menit")) |>
+  # displyr mutate: membuat variabel baru/update variabel & mempertahankan variabel lainnya
+  # diplyr transmute: membuat variabel baru/update variabel & membuang variabel lain yang tidak dibuat/update
+  # lubridate ymd_hm: mengubah string menjadi datetime value (ymd_hm("2023-09-01 13:05") / as_datetime("2023-09-01 13:05"))
+  mutate(
+    tanggal = as_date(Tanggal),
+    # Membulatkan menit jadi per sepuluh menit
+    Menit = round(as.numeric(Menit)/10, digits = 0)*10,
+    waktu = ymd_hm(paste0(tanggal, Jam, Menit)),
+    tinggi_air = `Tinggi Air`/10 # Konversi mm ke cm
+  )
+
+tma_d |> print(width = Inf)
+```
+```{r}
+tma_d |>
+  distinct(Menit) |>
+  filter(str_detect(Menit, "0$", negate = TRUE))
+```
+
+```{r}
+tma_d <- tma_d |>
+  select(waktu, tinggi_air)
+tma_d
+```
+
+```{r}
+tma_d <- tma_depok |> # |>: pipe operator "then"
+  # Memisahkan kolom "Jam" menjadi kolom Jam dan menit berdasarkan ":"
+  separate_wider_delim(cols = Jam, delim = ":", names = c("Jam","Menit")) |>
+  # displyr mutate: membuat variabel baru/update variabel & mempertahankan variabel lainnya
+  # diplyr transmute: membuat variabel baru/update variabel & membuang variabel lain yang tidak dibuat/update
+  # lubridate ymd_hm: mengubah string menjadi datetime value (ymd_hm("2023-09-01 13:05") / as_datetime("2023-09-01 13:05"))
+  mutate(
+    tanggal = as_date(Tanggal),
+    # Membulatkan menit jadi per sepuluh menit
+    Menit = round(as.numeric(Menit)/10, digits = 0)*10
+  ) |>
+  transmute(
+    waktu = ymd_hm(paste0(tanggal, Jam, Menit)),
+    tinggi_air = `Tinggi Air`/10 # Konversi mm ke cm
+  )
+
+tma_d
+```
+# Duplicate Data
+```{r}
+# Cek jika ada duplikat
+tma_d |>
+  nrow()
+
+tma_d |>
+  distinct(waktu) |>
+  nrow()
+```
+```{r}
+tma_d |>
+  count(waktu, sort = TRUE)
+
+tma_d |>
+  filter(waktu == as_datetime("2023-01-01 13:20:00"))
+
+tma_d |>
+  distinct(waktu, tinggi_air) |>
+  count(waktu, sort = TRUE)
+
+tma_d |>
+  filter(waktu == as_datetime("2023-01-03 10:10:00"))
+
+tma_d |>
+  filter(waktu == as_datetime("2023-01-07 22:10:00"))
+
+# Apa saja pilihan untuk menghilangkan data duplikat?
+# Apabila waktu dan tinggi air nya sama maka boleh pilih salah satu saja. Apabila waktu sama namun tinggi air berbeda, kita dapat menghitung rata-rata dari kedua data tersebut untuk kita gunakan.
+```
+```{r}
+# Remove duplicate dengan cara menghitung rata-rata untuk waktu yang sama
+# group by waktu
+
+tma_d <- tma_d |>
+  group_by(waktu) |>
+  summarise(
+    avg_tma = mean(tinggi_air)
+  )
+tma_d
+
+tma_d |> 
+  summary()
+```
+```{r}
+# Hanya memilih data pada menit 00 sehingga data per jam
+tma_d <- tma_d |>
+  filter(minute(waktu) == 0)
+tma_d
+
+range(tma_d$waktu)
+```
+
+```{r}
+# Membuat list waktu lengkap per jam
+x_time <- seq(from = min(tma_d$waktu),
+              to = max(tma_d$waktu),
+              by = "hour")
+
+# x_time
+x_time |>
+  length()
+
+x_time |>
+  summary()
+```
+```{r}
+# Menambahkan waktu yang "lompat" dengan left join
+# waktu yang tidak ada tinggi airnya akan menjadi missing value
+tma_depok_miss <- tibble(waktu = x_time) |>
+  left_join(
+    tma_d,
+    by = join_by(waktu)
+  )
+tma_depok_miss
+
+# Data dengan missing value
+tma_depok_miss |>
+  filter(is.na(avg_tma))
+```
+# Visualisasi
+```{r}
+library(ggplot2)
+```
+
+```{r}
+# Histogram
+tma_depok_miss |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_histogram(color = "grey") +
+  theme_bw()
+
+# Histogram
+tma_depok_miss |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_histogram(bins = 100, color = "grey") +
+  theme_bw()
+
+# Histogram + mean
+tma_depok_miss |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_histogram(bins = 100, color = "grey") +
+  geom_vline(xintercept = mean(tma_depok_miss$avg_tma, na.rm = TRUE), color = "red", linetype = "dashed")
+  theme_bw()
+```
+```{r}
+# Boxplot
+tma_depok_miss |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_boxplot() +
+  theme_bw()
+
+# Boxplot + mean
+tma_depok_miss |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_boxplot() +
+  geom_vline(xintercept = mean(tma_depok_miss$avg_tma, na.rm = TRUE), color = "red", linetype = "dashed")
+  theme_bw()
+```
+
+```{r}
+# Extreme data
+tma_depok_miss |>
+  filter(avg_tma <= 0 | avg_tma > 500)
+
+# Boxplot + mean
+tma_depok_miss |>
+  filter(between(avg_tma, 0, 500)) |>
+  ggplot(mapping = aes(x = avg_tma)) +
+  geom_boxplot() +
+  theme_bw()
+
+# Boxplot + kategori
+tma_depok_miss |>
+  filter(between(avg_tma, 0, 500)) |>
+  mutate(
+    kategori_waktu = case_when(
+      between(hour(waktu), 6, 18) ~ "Siang",
+      TRUE ~ "Malam"
+    )
+  ) |>
+  ggplot(mapping = aes(x = avg_tma, y = kategori_waktu, fill = kategori_waktu)) +
+  geom_boxplot() +
+  stat_summary(fun = ~mean(.x, na.rm = TRUE), geom = "point", color = "firebrick")
+  theme_bw()
+  
+# Boxplot + kategori
+tma_depok_miss |>
+  filter(between(avg_tma, 0, 500)) |>
+  mutate(
+    kategori_waktu = case_when(
+      between(hour(waktu), 6, 18) ~ "Siang",
+      TRUE ~ "Malam"
+    ),
+    bulan = case_when(
+      month(waktu) == 1 ~ "Jan",
+      month(waktu) == 2 ~ "Feb",
+      month(waktu) == 3 ~ "Mar",
+      TRUE ~ "Unk"
+    )
+  ) |>
+  ggplot(mapping = aes(x = avg_tma, y = bulan, fill = kategori_waktu)) +
+  geom_boxplot() +
+  stat_summary(fun = ~mean(.x, na.rm = TRUE), geom = "point", color = "firebrick")
+  theme_bw()
+```
+```{r}
+# Density + kategori
+tma_depok_miss |>
+  mutate(
+    kategori_waktu = case_when(
+      between(hour(waktu), 6, 18) ~ "Siang",
+      TRUE ~ "Malam"
+    )
+  ) |>
+  ggplot(mapping = aes(x = avg_tma, fill = kategori_waktu)) +
+  geom_density(alpha = 0.7) +
+  theme_bw()
+
+# Density + kategori
+tma_depok_miss |>
+  filter(between(avg_tma, 0, 500)) |>
+  mutate(
+    kategori_waktu = case_when(
+      between(hour(waktu), 6, 18) ~ "Siang",
+      TRUE ~ "Malam"
+    )
+  ) |>
+  ggplot(mapping = aes(x = avg_tma, fill = kategori_waktu)) +
+  geom_density(alpha = 0.7) +
+  theme_bw()
+```
+```{r}
+# Time Series
+tma_depok_miss |>
+  ggplot(aes(x = waktu, y = avg_tma))+
+  geom_line() +
+  theme_bw()
+```
+```{r}
+tma_depok_miss |>
+  ggplot(aes(x = waktu, y = avg_tma))+
+  geom_ribbon(aes(ymin = 0, ymax= 200), fill = "green", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 200, ymax= 270), fill = "steelblue", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 270, ymax= 350), fill = "orange", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 350, ymax= 600), fill = "firebrick", alpha = 0.3) +
+  geom_line()+
+  theme_bw()
+```
+# Penanganan Pencilan/Anomali
+
+```{r}
+tma_depok_miss <- tma_depok_miss |>
+  mutate(
+    avg_tma = case_when(
+      avg_tma < 0 ~ NA,
+      avg_tma > 600 ~ NA,
+      TRUE ~ avg_tma
+    )
+  )
+
+tma_depok_miss |>
+  ggplot(aes(x = waktu, y = avg_tma))+
+  geom_ribbon(aes(ymin = 0, ymax= 200), fill = "green", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 200, ymax= 270), fill = "steelblue", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 270, ymax= 350), fill = "orange", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 350, ymax= 600), fill = "firebrick", alpha = 0.3) +
+  geom_line()+
+  theme_bw()
+```
+# Penanganan Missing Value
+```{r}
+library(tidyr)
+# Mengganti missing value dengan nilai pada waktu sebelumnya
+tma_d_complete <- tma_depok_miss |>
+  arrange(waktu) |>
+  fill(avg_tma, .direction = "down")
+
+tma_d_complete |>
+  filter(is.na(avg_tma))
+
+tma_d_complete |>
+  ggplot(aes(x = waktu, y = avg_tma))+
+  geom_ribbon(aes(ymin = 0, ymax= 200), fill = "green", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 200, ymax= 270), fill = "steelblue", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 270, ymax= 350), fill = "orange", alpha = 0.3) +
+  geom_ribbon(aes(ymin = 350, ymax= 600), fill = "firebrick", alpha = 0.3) +
+  geom_line()+
+  theme_bw()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
